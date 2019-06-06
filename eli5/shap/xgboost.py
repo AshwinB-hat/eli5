@@ -1,10 +1,19 @@
+# -*- coding: utf-8 -*-
+from __future__ import absolute_import
+from functools import partial
+import re
+from typing import Any, Dict, List, Tuple, Optional, Pattern
+
+import numpy as np  # type: ignore
+import scipy.sparse as sp  # type: ignore
 from xgboost import (  # type: ignore
     XGBClassifier,
     XGBRegressor,
     Booster,
     DMatrix
 )
-import numpy as np 
+
+from eli5.explain import explain_weights, explain_prediction
 from eli5.sklearn.utils import (
     add_intercept,
     get_X,
@@ -12,9 +21,17 @@ from eli5.sklearn.utils import (
     handle_vec,
     predict_proba
 )
-import scipy.sparse as sp
+from eli5.utils import is_sparse_vector
+from eli5._decision_path import get_decision_path_explanation
+from eli5._feature_importances import get_feature_importance_explanation
 
-def explain_shap_xgboost(
+
+DESCRIPTION_XGBOOST = """
+XGBoost feature importances; values are numbers 0 <= x <= 1;
+all values sum to 1.
+"""
+
+def explain_prediction_xgboost(
         xgb, doc,
         vec=None,
         top=None,
@@ -144,7 +161,6 @@ def explain_shap_xgboost(
         get_score_weights=lambda label_id: scores_weights[label_id],
      )
 
-
 def _check_booster_args(xgb, is_regression=None):
     # type: (Any, Optional[bool]) -> Tuple[Booster, Optional[bool]]
     if isinstance(xgb, Booster):
@@ -163,7 +179,6 @@ def _check_booster_args(xgb, is_regression=None):
         is_regression = _is_regression
     return booster, is_regression
 
-
 def _prediction_feature_weights(booster, dmatrix, n_targets,
                                 feature_names, xgb_feature_names):
     """ For each target, return score and numpy array with feature weights
@@ -171,22 +186,29 @@ def _prediction_feature_weights(booster, dmatrix, n_targets,
     http://blog.datadive.net/interpreting-random-forests/
     """
     # XGBClassifier does not have pred_leaf argument, so use booster
-    leaf_ids, = booster.predict(dmatrix, pred_leaf=True)
+    phi = booster.predict(dmatrix, pred_contrib=True)
     xgb_feature_names = {f: i for i, f in enumerate(xgb_feature_names)}
-    tree_dumps = booster.get_dump(with_stats=True)
-    assert len(tree_dumps) == len(leaf_ids)
-
+    
     target_feature_weights = partial(
         _target_feature_weights,
         feature_names=feature_names, xgb_feature_names=xgb_feature_names)
-    if n_targets > 1:
-        # For multiclass, XGBoost stores dumps and leaf_ids in a 1d array,
-        # so we need to split them.
-        scores_weights = [
-            target_feature_weights(
-                leaf_ids[target_idx::n_targets],
-                tree_dumps[target_idx::n_targets],
-            ) for target_idx in range(n_targets)]
-    else:
-        scores_weights = [target_feature_weights(leaf_ids, tree_dumps)]
+    # if n_targets > 1:
+    #     # For multiclass, XGBoost stores dumps and leaf_ids in a 1d array,
+    #     # so we need to split them.
+    #     scores_weights = [
+    #         target_feature_weights(
+    #             leaf_ids[target_idx::n_targets],
+    #             tree_dumps[target_idx::n_targets],
+    #         ) for target_idx in range(n_targets)]
+    # else:
+    scores_weights = [target_feature_weights(phi)]
     return scores_weights
+
+def _target_feature_weights(phi, feature_names,
+                            xgb_feature_names):
+    feature_weights = np.zeros(len(feature_names))
+    # All trees in XGBoost give equal contribution to the prediction:
+    # it is equal to sum of "leaf" values in leafs
+    # before applying loss-specific function
+    # (e.g. logistic for "binary:logistic" loss).
+    return score, feature_weights
