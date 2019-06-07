@@ -79,3 +79,11 @@ try:
 except ImportError:
     # catboost is not available
     pass   
+
+try:
+    from .shap_xgboost import (
+        explain_shap_prediction_xgboost
+    )
+except ImportError:
+    print("Error importing new xgboost")
+    pass
