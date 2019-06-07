@@ -211,4 +211,4 @@ def _target_feature_weights(phi, feature_names,
     # it is equal to sum of "leaf" values in leafs
     # before applying loss-specific function
     # (e.g. logistic for "binary:logistic" loss).
-    return score, feature_weights
+    return feature_weights
