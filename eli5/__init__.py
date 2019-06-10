@@ -87,3 +87,11 @@ try:
 except ImportError:
     print("Error importing new xgboost")
     pass
+
+try:
+    from .shap_lightgbm import (
+        explain_shap_prediction_lightgbm
+    )
+except ImportError:
+    print("Error importing shap lightgbm")
+    pass
