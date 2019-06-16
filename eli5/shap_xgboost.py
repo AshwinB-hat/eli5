@@ -24,7 +24,7 @@ from eli5.sklearn.utils import (
 from eli5.utils import is_sparse_vector
 from eli5._decision_path import get_decision_path_explanation
 from eli5._feature_importances import get_feature_importance_explanation
-
+from eli5._shap_explanation_summary import get_shap_explanation_summary
 
 DESCRIPTION_XGBOOST_SHAP = """
 XGBoost feature importances; values are numbers 0 <= x <= 1;
@@ -65,23 +65,14 @@ def explain_shap_prediction_xgboost(
             dmatrix=DMatrix(get_X(doc,vec=vec,vectorized=vectorized), missing=missing)
         else:
             dmatrix = DMatrix(doc, missing=missing)
-    
-    n_targets = dmatrix.num_col()
-    n_row = dmatrix.num_row()
-    # score_weights = _prediction_feature_weights(
-    #     booster, dmatrix, n_targets, feature_names, xgb_feature_names)
     coef = _xgb_feature_importances(booster, dmatrix)
-    return get_feature_importance_explanation(xgb, vec, coef,
-                                              feature_names=feature_names,
-                                              estimator_feature_names=xgb_feature_names,
-                                              feature_filter=None,
-                                              feature_re=None,
-                                              top=top,
-                                              description=DESCRIPTION_XGBOOST_SHAP,
-                                              is_regression=is_regression,
-                                              num_features=coef.shape[-1]
-                                              )
-
+    return get_shap_explanation_summary(xgb, vec=vec, coef=coef,
+                                  feature_names=feature_names,
+                                  feature_filter=feature_filter, 
+                                  feature_re=feature_re, top=top, is_regression=is_regression,
+                                  Description=DESCRIPTION_XGBOOST_SHAP)
+        
+            
 def _check_booster_args(xgb, is_regression=None):
     # type: (Any, Optional[bool]) -> Tuple[Booster, Optional[bool]]
     if isinstance(xgb, Booster):
