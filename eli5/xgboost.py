@@ -83,9 +83,6 @@ def explain_weights_xgboost(xgb,
     )
 
 
-@explain_prediction.register(XGBClassifier)
-@explain_prediction.register(XGBRegressor)
-@explain_prediction.register(Booster)
 def explain_prediction_xgboost(
         xgb, doc,
         vec=None,
@@ -194,6 +191,136 @@ def explain_prediction_xgboost(
 
     scores_weights = _prediction_feature_weights(
         booster, dmatrix, n_targets, feature_names, xgb_feature_names)
+
+    x = get_X0(add_intercept(X))
+    x = _missing_values_set_to_nan(x, missing, sparse_missing=True)
+
+    return get_decision_path_explanation(
+        xgb, doc, vec,
+        x=x,
+        feature_names=feature_names,
+        feature_filter=feature_filter,
+        feature_re=feature_re,
+        top=top,
+        vectorized=vectorized,
+        original_display_names=names,
+        target_names=target_names,
+        targets=targets,
+        top_targets=top_targets,
+        is_regression=is_regression,
+        is_multiclass=n_targets > 1,
+        proba=proba,
+        get_score_weights=lambda label_id: scores_weights[label_id],
+     )
+
+
+@explain_prediction.register(XGBClassifier)
+@explain_prediction.register(XGBRegressor)
+@explain_prediction.register(Booster)
+def explain_shap_prediction_xgboost(
+        xgb, doc,
+        vec=None,
+        top=None,
+        top_targets=None,
+        target_names=None,
+        targets=None,
+        feature_names=None,
+        feature_re=None,  # type: Pattern[str]
+        feature_filter=None,
+        vectorized=False,  # type: bool
+        is_regression=None,  # type: bool
+        missing=None,  # type: bool
+        ):
+    """ Return an explanation of XGBoost prediction (via scikit-learn wrapper
+        XGBClassifier or XGBRegressor, or via xgboost.Booster) as feature weights.
+
+        See :func:`eli5.explain_prediction` for description of
+        ``top``, ``top_targets``, ``target_names``, ``targets``,
+        ``feature_names``, ``feature_re`` and ``feature_filter`` parameters.
+
+        Parameters
+        ----------
+        vec : vectorizer, optional
+            A vectorizer instance used to transform
+            raw features to the input of the estimator ``xgb``
+            (e.g. a fitted CountVectorizer instance); you can pass it
+            instead of ``feature_names``.
+
+        vectorized : bool, optional
+            A flag which tells eli5 if ``doc`` should be
+            passed through ``vec`` or not. By default it is False, meaning that
+            if ``vec`` is not None, ``vec.transform([doc])`` is passed to the
+            estimator. Set it to True if you're passing ``vec``,
+            but ``doc`` is already vectorized.
+
+        is_regression : bool, optional
+            Pass if an ``xgboost.Booster`` is passed as the first argument.
+            True if solving a regression problem ("objective" starts with "reg")
+            and False for a classification problem.
+            If not set, regression is assumed for a single target estimator
+            and proba will not be shown.
+
+        missing : optional
+            Pass if an ``xgboost.Booster`` is passed as the first argument.
+            Set it to the same value as the ``missing`` argument to
+            ``xgboost.DMatrix``.
+            Matters only if sparse values are used. Default is ``np.nan``.
+
+        Method for determining feature importances follows an idea from
+        SHAP paper.
+        Feature weights are calculated by calculating marginal contribution of the respective feature
+        splits to the final output.
+
+        Weights of all features sum to the output score of the estimator.
+        """
+    booster, is_regression = _check_booster_args(xgb, is_regression)
+    xgb_feature_names = booster.feature_names
+    vec, feature_names = handle_vec(
+        xgb, doc, vec, vectorized, feature_names,
+        num_features=len(xgb_feature_names))
+    if feature_names.bias_name is None:
+        # XGBoost estimators do not have an intercept, but here we interpret
+        # them as having an intercept
+        feature_names.bias_name = '<BIAS>'
+
+    X = get_X(doc, vec, vectorized=vectorized)
+    if sp.issparse(X):
+        # Work around XGBoost issue:
+        # https://github.com/dmlc/xgboost/issues/1238#issuecomment-243872543
+        X = X.tocsc()
+
+    if missing is None:
+        missing = np.nan if isinstance(xgb, Booster) else xgb.missing
+    dmatrix = DMatrix(X, missing=missing)
+
+    if isinstance(xgb, Booster):
+        prediction = xgb.predict(dmatrix)
+        n_targets = prediction.shape[-1]  # type: int
+        if is_regression is None:
+            # When n_targets is 1, this can be classification too,
+            # but it's safer to assume regression.
+            # If n_targets > 1, it must be classification.
+            is_regression = n_targets == 1
+        if is_regression:
+            proba = None
+        else:
+            if n_targets == 1:
+                p, = prediction
+                proba = np.array([1 - p, p])
+            else:
+                proba, = prediction
+    else:
+        proba = predict_proba(xgb, X)
+        n_targets = _xgb_n_targets(xgb)
+
+    if is_regression:
+        names = ['y']
+    elif isinstance(xgb, Booster):
+        names = np.arange(max(2, n_targets))
+    else:
+        names = xgb.classes_
+
+    scores_weights = shap_prediction_weights(booster, dmatrix, n_targets)
 
     x = get_X0(add_intercept(X))
     x = _missing_values_set_to_nan(x, missing, sparse_missing=True)
@@ -413,3 +540,13 @@ def _missing_values_set_to_nan(values, missing_value, sparse_missing):
     if not np.isnan(missing_value):
         values[values == missing_value] = np.nan
     return values
+
+
+def shap_prediction_weights(booster, dmatrix, n_targets):
+    feature_weights = booster.predict(dmatrix, pred_contribs=True)
+    if n_targets > 1:
+        score_weights = [i for i in zip(np.sum(feature_weights, axis=2).squeeze(), feature_weights.squeeze())]
+    else:
+        score_weights = [(np.sum(feature_weights), feature_weights.squeeze())]
+
+    return score_weights
