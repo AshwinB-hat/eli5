@@ -65,8 +65,6 @@ def explain_weights_lightgbm(lgb,
     )
 
 
-@explain_prediction.register(lightgbm.LGBMClassifier)
-@explain_prediction.register(lightgbm.LGBMRegressor)
 def explain_prediction_lightgbm(
         lgb, doc,
         vec=None,
@@ -117,6 +115,88 @@ def explain_prediction_lightgbm(
 
     proba = predict_proba(lgb, X)
     weight_dicts = _get_prediction_feature_weights(lgb, X, _lgb_n_targets(lgb))
+    x = get_X0(add_intercept(X))
+
+    is_regression = isinstance(lgb, lightgbm.LGBMRegressor)
+    is_multiclass = _lgb_n_targets(lgb) > 2
+    names = lgb.classes_ if not is_regression else ['y']
+
+    def get_score_weights(_label_id):
+        _weights = _target_feature_weights(
+            weight_dicts[_label_id],
+            num_features=len(feature_names),
+            bias_idx=feature_names.bias_idx,
+        )
+        _score = _get_score(weight_dicts[_label_id])
+        return _score, _weights
+
+    return get_decision_path_explanation(
+        lgb, doc, vec,
+        x=x,
+        feature_names=feature_names,
+        feature_filter=feature_filter,
+        feature_re=feature_re,
+        top=top,
+        vectorized=vectorized,
+        original_display_names=names,
+        target_names=target_names,
+        targets=targets,
+        top_targets=top_targets,
+        is_regression=is_regression,
+        is_multiclass=is_multiclass,
+        proba=proba,
+        get_score_weights=get_score_weights,
+     )
+
+
+@explain_prediction.register(lightgbm.LGBMClassifier)
+@explain_prediction.register(lightgbm.LGBMRegressor)
+def explain_shap_prediction_lightgbm(
+        lgb, doc,
+        vec=None,
+        top=None,
+        top_targets=None,
+        target_names=None,
+        targets=None,
+        feature_names=None,
+        feature_re=None,
+        feature_filter=None,
+        vectorized=False,
+        ):
+    """ Return an explanation of LightGBM prediction (via scikit-learn wrapper
+    LGBMClassifier or LGBMRegressor) as feature weights.
+
+    See :func:`eli5.explain_prediction` for description of
+    ``top``, ``top_targets``, ``target_names``, ``targets``,
+    ``feature_names``, ``feature_re`` and ``feature_filter`` parameters.
+
+    ``vec`` is a vectorizer instance used to transform
+    raw features to the input of the estimator ``xgb``
+    (e.g. a fitted CountVectorizer instance); you can pass it
+    instead of ``feature_names``.
+
+    ``vectorized`` is a flag which tells eli5 if ``doc`` should be
+    passed through ``vec`` or not. By default it is False, meaning that
+    if ``vec`` is not None, ``vec.transform([doc])`` is passed to the
+    estimator. Set it to True if you're passing ``vec``,
+    but ``doc`` is already vectorized.
+
+    Method for determining feature importances follows an idea from
+    Tree Shap paper.
+    Feature weights are calculated by their marginal contribution to the
+    prediction score.
+    Weights of all features sum to the output score of the estimator.
+    """
+
+    vec, feature_names = handle_vec(lgb, doc, vec, vectorized, feature_names)
+    if feature_names.bias_name is None:
+        # LightGBM estimators do not have an intercept, but here we interpret
+        # them as having an intercept
+        feature_names.bias_name = '<BIAS>'
+    X = get_X(doc, vec, vectorized=vectorized)
+
+    proba = predict_proba(lgb, X)
+    weight_dicts = _get_shap_prediction_feature_weights(lgb, X, _lgb_n_targets(lgb))
     x = get_X0(add_intercept(X))
 
     is_regression = isinstance(lgb, lightgbm.LGBMRegressor)
@@ -278,3 +358,30 @@ def _target_feature_weights(feature_weights_dict, num_features, bias_idx):
 
 def _get_score(feature_weights_dict):
     return sum(feature_weights_dict.values())
+
+
+def _get_shap_prediction_feature_weights(lgb, X, n_targets):
+    # shap prediction values
+    feature_weights = lgb.predict(X, pred_contrib=True).squeeze()
+    res = list()
+    if n_targets == 2:
+        n_targets = 1
+    num_features = len(feature_weights)//n_targets
+    for target in range(n_targets):
+        score_weights = defaultdict(float)
+        bias, weights = _get_multi_feature_weights(feature_weights, target, num_features)
+        for index, weight in enumerate(weights):
+            score_weights[index] += weight
+        score_weights[None] += bias
+        res.append(dict(score_weights))
+    return res
+
+
+def _get_multi_feature_weights(feature_weights, target, num_features):
+    # function to split array into various feature segments in lightgbm shap prediction,
+    # especially in multi-class classification.
+    start_index = target*num_features
+    end_index = start_index+num_features-1
+    weight = feature_weights[start_index: end_index]
+    bias = feature_weights[end_index]
+    return bias, weight

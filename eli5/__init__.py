@@ -48,7 +48,8 @@ except ImportError as e:
 try:
     from .xgboost import (
         explain_weights_xgboost,
-        explain_prediction_xgboost
+        explain_prediction_xgboost,
+        explain_shap_prediction_xgboost
     )
 except ImportError:
     # xgboost is not available
@@ -63,7 +64,8 @@ except Exception as e:
 try:
     from .lightgbm import (
         explain_weights_lightgbm,
-        explain_prediction_lightgbm
+        explain_prediction_lightgbm,
+        explain_shap_prediction_lightgbm
     )
 except ImportError:
     # lightgbm is not available
@@ -79,19 +81,3 @@ try:
 except ImportError:
     # catboost is not available
     pass   
-
-try:
-    from .shap_xgboost import (
-        explain_shap_prediction_xgboost
-    )
-except ImportError:
-    print("Error importing new xgboost")
-    pass
-
-try:
-    from .shap_lightgbm import (
-        explain_shap_prediction_lightgbm
-    )
-except ImportError:
-    print("Error importing shap lightgbm")
-    pass
