@@ -320,7 +320,7 @@ def explain_shap_prediction_xgboost(
     else:
         names = xgb.classes_
 
-    scores_weights = shap_prediction_weights(booster, dmatrix, n_targets)
+    scores_weights = _get_shap_prediction_feature_weights(booster, dmatrix, n_targets)
 
     x = get_X0(add_intercept(X))
     x = _missing_values_set_to_nan(x, missing, sparse_missing=True)
@@ -542,10 +542,12 @@ def _missing_values_set_to_nan(values, missing_value, sparse_missing):
     return values
 
 
-def shap_prediction_weights(booster, dmatrix, n_targets):
+def _get_shap_prediction_feature_weights(booster, dmatrix, n_targets):
+    # calculating Shap Values for xgboost
     feature_weights = booster.predict(dmatrix, pred_contribs=True)
     if n_targets > 1:
-        score_weights = [i for i in zip(np.sum(feature_weights, axis=2).squeeze(), feature_weights.squeeze())]
+        # multi-class classifier prediction is in form (n_classes, n_features)
+        score_weights = list(zip(np.sum(feature_weights, axis=2).squeeze(), feature_weights.squeeze()))
     else:
         score_weights = [(np.sum(feature_weights), feature_weights.squeeze())]
 

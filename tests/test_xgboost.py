@@ -495,3 +495,13 @@ def test_check_booster_args():
     assert is_regression is None
     _, is_regression = _check_booster_args(booster, is_regression=True)
     assert is_regression is True
+
+
+def test_check_shap_prediction_sum_feature_weights():
+    x, y = np.random.random((10, 2)), np.random.randint(2, size=10)
+    regressor = XGBRegressor().fit(x, y)
+
+    shap_pred_regressor = np.sum(regressor.get_booster().predict(xgboost.DMatrix(x), pred_contribs=True), axis=1)
+    pred_regressor = regressor.get_booster().predict(xgboost.DMatrix(x))
+
+    np.testing.assert_array_almost_equal(shap_pred_regressor, pred_regressor)
