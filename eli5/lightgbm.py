@@ -367,21 +367,12 @@ def _get_shap_prediction_feature_weights(lgb, X, n_targets):
     if n_targets == 2:
         n_targets = 1
     num_features = len(feature_weights)//n_targets
+    feature_weights = np.reshape( feature_weights, (n_targets, num_features))
     for target in range(n_targets):
         score_weights = defaultdict(float)
-        bias, weights = _get_multi_feature_weights(feature_weights, target, num_features)
+        bias, weights = feature_weights[target, -1], feature_weights[target, :-1]
         for index, weight in enumerate(weights):
             score_weights[index] += weight
         score_weights[None] += bias
         res.append(dict(score_weights))
     return res
-
-
-def _get_multi_feature_weights(feature_weights, target, num_features):
-    # function to split array into various feature segments in lightgbm shap prediction,
-    # especially in multi-class classification.
-    start_index = target*num_features
-    end_index = start_index+num_features-1
-    weight = feature_weights[start_index: end_index]
-    bias = feature_weights[end_index]
-    return bias, weight
